@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COI Generator</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+  input, textarea { width: 100%; padding: 8px; margin: 5px 0; border-radius: 5px; border: 1px solid #ccc; }
+  button { padding: 8px 15px; margin: 5px 5px 15px 0; border-radius: 5px; border: none; background: #667eea; color: white; cursor: pointer; }
+  button:hover { background: #5466c1; }
+  #reviewerList span { display: inline-block; padding: 5px 10px; margin: 3px; border-radius: 15px; background: #667eea; color: white; }
+  a.pubmed-link { display: inline-block; margin: 5px 0; color: #1a73e8; text-decoration: none; }
+  a.pubmed-link:hover { text-decoration: underline; }
+  .section { margin-bottom: 25px; padding: 15px; background: white; border-radius: 10px; box-shadow: 0 0 5px rgba(0,0,0,0.1); }
+  label { font-weight: bold; display: block; margin-bottom: 5px; }
+</style>
+</head>
+<body>
+
+<div class="section">
+  <label for="authorInput">Enter Authors (comma separated)</label>
+  <input id="authorInput" placeholder="e.g., John Doe, Jane Smith">
+  <button onclick="generateAuthorCOI()">Generate Author COI</button>
+  <label for="authorCOI">Author COI Output</label>
+  <textarea id="authorCOI" rows="2" readonly></textarea>
+  <a id="authorCOIPubMed" class="pubmed-link" href="#" target="_blank">PubMed Link</a>
+</div>
+
+<div class="section">
+  <label for="reviewerInput">Enter Reviewer</label>
+  <input id="reviewerInput" placeholder="Type reviewer name">
+  <button onclick="addReviewer()">Add Reviewer</button>
+  <div id="reviewerList"></div>
+</div>
+
+<div class="section">
+  <label for="authorReviewerCOI">Author–Reviewer COI</label>
+  <textarea id="authorReviewerCOI" rows="2" readonly></textarea>
+  <a id="authorReviewerPubMed" class="pubmed-link" href="#" target="_blank">PubMed Link</a>
+</div>
+
+<div class="section">
+  <label for="reviewerReviewerCOI">Reviewer–Reviewer COI</label>
+  <textarea id="reviewerReviewerCOI" rows="2" readonly></textarea>
+  <a id="reviewerReviewerPubMed" class="pubmed-link" href="#" target="_blank">PubMed Link</a>
+</div>
+
+<div class="section">
+  <label>Conflict Validation</label>
+  <div id="validationResult">No validation yet</div>
+</div>
+
+<script>
+/** @type {string[]} */
+let reviewers = [];
+/** @type {string[]} */
+let authorFormatted = [];
+
+// ---------- STEP 1 FUNCTIONS ----------
+function cleanName(name) {
+  name = name.split("http")[0];
+  name = name.replace(/[0-9]/g, "").replace(/[^\w\s]/gi, "");
+  return name.trim();
+}
+
+function formatName(name) {
+  let parts = name.split(" ").filter(p => p);
+
+  if (parts.length === 1) return `${parts[0]} [Au]`;
+
+  if (parts.length === 2) {
+    let first = parts[0];
+    let last = parts[1];
+    if (first.length > 5) {
+      return `${last},${first} [Au]`;
+    }
+    return `${last} ${first[0]} [Au]`;
+  }
+
+  let initials = parts.slice(0, -1).map(p => p[0]).join("");
+  let last = parts[parts.length - 1];
+
+  return `${last} ${initials} [Au]`;
+}
+
+// ---------- AUTHOR COI ----------
+function generateAuthorCOI() {
+  let input = document.getElementById("authorInput")?.value || "";
+  let authors = input.split(",");
+  authorFormatted = authors.map(a => formatName(cleanName(a)));
+  let coi = "(" + authorFormatted.join(" OR ") + ")";
+  let box = document.getElementById("authorCOI");
+  if (box) box.value = coi;
+
+  generatePubMedLink("authorCOIPubMed", coi);
+}
+
+// ---------- ADD REVIEWER ----------
+function addReviewer() {
+  let name = document.getElementById("reviewerInput")?.value.trim() || "";
+  if (!name) return;
+
+  if (name.toLowerCase() === "revert back") {
+    reviewers.pop();
+  } else {
+    if (reviewers.length >= 10) {
+      alert("Maximum 10 reviewers reached");
+      return;
+    }
+    reviewers.push(name);
+  }
+
+  let reviewerInputBox = document.getElementById("reviewerInput");
+  if (reviewerInputBox) reviewerInputBox.value = "";
+  updateUI();
+}
+
+// ---------- UPDATE UI ----------
+function updateUI() {
+  let reviewerListBox = document.getElementById("reviewerList");
+  if (reviewerListBox) {
+    reviewerListBox.innerHTML =
+      reviewers.map(r => `<span>${r}</span>`).join("");
+  }
+
+  generateAuthorReviewerCOI();
+  generateReviewerReviewerCOI();
+}
+
+// ---------- AUTHOR-REVIEWER COI ----------
+function generateAuthorReviewerCOI() {
+  if (reviewers.length === 0 || authorFormatted.length === 0) return;
+
+  let latestReviewer = formatName(cleanName(reviewers[reviewers.length - 1]));
+  let authorPart = "(" + authorFormatted.join(" OR ") + ")";
+  let reviewerPart = "(" + latestReviewer + ")";
+  let final = `${reviewerPart} AND ${authorPart}`;
+
+  let box = document.getElementById("authorReviewerCOI");
+  if (box) box.value = final;
+
+  generatePubMedLink("authorReviewerPubMed", final);
+  validateConflict(final);
+}
+
+// ---------- REVIEWER-REVIEWER COI ----------
+function generateReviewerReviewerCOI() {
+  let box = document.getElementById("reviewerReviewerCOI");
+  let linkEl = document.getElementById("reviewerReviewerPubMed");
+  if (!box || !linkEl) return;
+
+  if (reviewers.length < 2) {
+    box.value = "Need at least 2 reviewers";
+    linkEl.innerText = "";
+    linkEl.href = "#";
+    return;
+  }
+
+  let latest = formatName(cleanName(reviewers[reviewers.length - 1]));
+  let previous = reviewers.slice(0, -1).map(r => formatName(cleanName(r)));
+
+  let prevBlock = "(" + previous.join(" OR ") + ")";
+  let latestBlock = "(" + latest + ")";
+  let final = `${latestBlock} AND ${prevBlock}`;
+
+  box.value = final;
+  generatePubMedLink("reviewerReviewerPubMed", final);
+}
+
+// ---------- GENERIC PUBMED LINK FUNCTION ----------
+function generatePubMedLink(elementId, query) {
+  let encoded = encodeURIComponent(query);
+  let link = `https://pubmed.ncbi.nlm.nih.gov/?term=${encoded}`;
+
+  let el = document.getElementById(elementId);
+  if (el) {
+    el.href = link;
+    el.innerText = link;
+  }
+}
+
+// ---------- CONFLICT VALIDATION ----------
+async function validateConflict(query) {
+  let url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&term=${encodeURIComponent(query)}`;
+
+  try {
+    let response = await fetch(url);
+    let data = await response.json();
+
+    let count = parseInt(data.esearchresult.count) || 0;
+    let resultBox = document.getElementById("validationResult");
+    if (!resultBox) return;
+
+    if (count > 0) {
+      resultBox.innerText = "⚠️ COI Conflict Detected (Publications found)";
+      resultBox.style.color = "red";
+    } else {
+      resultBox.innerText = "✅ No Conflict (No shared publications)";
+      resultBox.style.color = "green";
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+</script>
+
+</body>
+</html>
